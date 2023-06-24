@@ -208,6 +208,183 @@ public:
         QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
         // TODO: implement this
 
+		std::vector<Eigen::Matrix4d> Qs(heMesh.Vertices().size(), Eigen::Matrix4d::Zero());
+		for (size_t i = 0; i < heMesh.Polygons().size(); i++)
+		{
+			P *triangle = heMesh.Polygons()[i];
+
+			V *v0 = triangle->HalfEdge()->Origin();
+			V *v1 = triangle->HalfEdge()->End();
+			V *v2 = triangle->HalfEdge()->Next()->End();
+
+			Eigen::Vector3d normal = ((v2->pos - v0->pos).cross(v1->pos - v0->pos)).normalized();
+
+			double distance = -1 * v0->pos.dot(normal);
+
+			Eigen::Vector4d p(normal.x(), normal.y(), normal.z(), distance);
+
+			Eigen::Matrix4d kp = p * p.transpose();
+
+			Qs[heMesh.Index(v0)] += kp;
+			Qs[heMesh.Index(v1)] += kp;
+			Qs[heMesh.Index(v2)] += kp;
+		}
+
+		struct pair
+		{
+			V *v0;
+			V *v1;
+		};
+
+		double t = 0.0;
+
+		std::vector<pair> pairs;
+		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
+		{
+			V *v0 = heMesh.Vertices()[i];
+			for (size_t j = i + 1; j < heMesh.Vertices().size(); j++)
+			{
+				V *v1 = heMesh.Vertices()[j];
+				
+				if (v0->IsConnectedWith(v1) || (v0->pos - v1->pos).norm() < t)
+				{
+					pairs.push_back({v0, v1});
+				}
+			}
+		}
+
+		int min_i;
+		double min_error = DBL_MAX;
+		Eigen::Vector3d min_vv;
+		for (size_t i = 0; i < pairs.size(); ++i)
+		{
+			V *v0 = pairs[i].v0;
+			V *v1 = pairs[i].v1;
+
+			Eigen::Matrix4d Q0 = Qs[heMesh.Index(v0)];
+			Eigen::Matrix4d Q1 = Qs[heMesh.Index(v1)];
+
+			Eigen::Matrix4d Qv = Q0 + Q1;
+			Qv.row(3) << 0.0, 0.0, 0.0, 1.0;
+
+			Eigen::Vector3d vv;
+
+			Eigen::Matrix4d Qv_i;
+			bool invertible;
+			double determinant;
+			Qv.computeInverseAndDetWithCheck(Qv_i, determinant, invertible);
+			if (invertible)
+			{
+				Eigen::Vector4d vv4 = Qv_i * Eigen::Vector4d(0, 0, 0, 1);
+
+				vv = Eigen::Vector3d(vv4.x(), vv4.y(), vv4.z()) / vv4.w();
+			}
+			else
+			{
+				vv = (v0->pos + v1->pos) / 2;
+			}
+			Eigen::Vector4d vv4 = Eigen::Vector4d(vv.x(), vv.y(), vv.z(), 1);
+			
+			double error = vv4.transpose() * Qv * vv4;
+
+			if (error < min_error)
+			{
+				min_error = error;
+				min_i = i;
+				min_vv = vv;
+			}
+		}
+
+		V *v0 = pairs[min_i].v0;
+		V *v1 = pairs[min_i].v1;
+
+		Eigen::Vector3d vv = min_vv;
+
+		v0->pos = vv;
+		if (v0->IsConnectedWith(v1))
+		{
+			for (auto adj_v = v1->AdjVertices().begin();
+				adj_v != v1->AdjVertices().end();
+				adj_v++)
+			{
+				if (v0->IsConnectedWith(*adj_v))
+				{
+					H *h_edge0 = V::HalfEdgeAlong(v0, *adj_v);
+					H *h_edge1 = V::HalfEdgeAlong(v1, *adj_v);
+					if (h_edge0 && h_edge1)
+					{
+						h_edge0->SetNext(h_edge1->Next());
+						h_edge1->Pre()->SetNext(h_edge0);
+
+						h_edge0->Next()->SetPolygon(h_edge0->Polygon());
+						h_edge0->Pre()->SetPolygon(h_edge0->Polygon());
+
+						h_edge0->Polygon()->SetHalfEdge(h_edge0);
+					}
+					if (h_edge0->Polygon() != h_edge1->Polygon())
+					{
+						heMesh.RemovePolygon(h_edge1->Polygon());
+					}
+
+					H *hr_edge0 = V::HalfEdgeAlong(*adj_v, v0);
+					H *hr_edge1 = V::HalfEdgeAlong(*adj_v, v1);
+					if (hr_edge0 && hr_edge1)
+					{
+						hr_edge0->SetNext(hr_edge1->Next());
+						hr_edge1->Pre()->SetNext(hr_edge0);
+
+						hr_edge0->Next()->SetPolygon(hr_edge0->Polygon());
+						hr_edge0->Pre()->SetPolygon(hr_edge0->Polygon());
+
+						hr_edge0->Polygon()->SetHalfEdge(hr_edge0);
+					}
+					if (hr_edge0->Polygon() != hr_edge1->Polygon())
+					{
+						heMesh.RemovePolygon(hr_edge1->Polygon());
+					}
+
+					E *edge1 = V::EdgeBetween(*adj_v, v1);
+					heMesh.RemoveEdge(edge1);
+				}
+				else
+				{
+					H *h_edge1 = V::HalfEdgeAlong(v1, *adj_v);
+					if (h_edge1)
+					{
+						if (h_edge1->Origin() == v1)
+						{
+							h_edge1->SetOrigin(v0);
+						}
+						else
+						{
+							h_edge1->Next()->SetOrigin(v0);
+						}
+					}
+					
+
+					H *hr_edge1 = V::HalfEdgeAlong(*adj_v, v1);
+					if (hr_edge1)
+					{
+						if (hr_edge1->Origin() == v1)
+						{
+							hr_edge1->SetOrigin(v0);
+						}
+						else
+						{
+							hr_edge1->Next()->SetOrigin(v0);
+						}
+					}
+				}
+			}
+
+			heMesh.RemoveEdge(V::EdgeBetween(v0, v1));
+			heMesh.RemoveVertex(v1);
+		}
+		else
+		{
+
+		}
+
         return true;
     }
 
