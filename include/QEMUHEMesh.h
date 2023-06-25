@@ -303,48 +303,67 @@ public:
 		v0->pos = vv;
 		if (v0->IsConnectedWith(v1))
 		{
+			std::set<P *> removed_p;
+			std::set<E *> removed_e;
+			std::set<H *> removed_h;
 			for (auto adj_v = v1->AdjVertices().begin();
 				adj_v != v1->AdjVertices().end();
 				adj_v++)
 			{
+				if (v0 == *adj_v)
+					continue;
+
 				if (v0->IsConnectedWith(*adj_v))
 				{
-					H *h_edge0 = V::HalfEdgeAlong(v0, *adj_v);
-					H *h_edge1 = V::HalfEdgeAlong(v1, *adj_v);
-					if (h_edge0 && h_edge1)
+					E *edge0 = V::EdgeBetween(v0, *adj_v);
+
+					P *face0 = nullptr;
+					if (!edge0->HalfEdge()->IsOnBoundary() && edge0->HalfEdge()->Next()->End() == v1)
 					{
-						h_edge0->SetNext(h_edge1->Next());
-						h_edge1->Pre()->SetNext(h_edge0);
-
-						h_edge0->Next()->SetPolygon(h_edge0->Polygon());
-						h_edge0->Pre()->SetPolygon(h_edge0->Polygon());
-
-						h_edge0->Polygon()->SetHalfEdge(h_edge0);
+						face0 = edge0->HalfEdge()->Polygon();
 					}
-					if (h_edge0->Polygon() != h_edge1->Polygon())
+					else if (!edge0->HalfEdge()->Pair()->IsOnBoundary() && edge0->HalfEdge()->Pair()->Next()->End() == v1)
 					{
-						heMesh.RemovePolygon(h_edge1->Polygon());
+						face0 = edge0->HalfEdge()->Pair()->Polygon();
 					}
 
-					H *hr_edge0 = V::HalfEdgeAlong(*adj_v, v0);
-					H *hr_edge1 = V::HalfEdgeAlong(*adj_v, v1);
-					if (hr_edge0 && hr_edge1)
+					removed_p.insert(face0);
+
+					H *h_0 = nullptr;
+					H *h_1 = nullptr;
+					for (auto h : face0->AdjHalfEdges())
 					{
-						hr_edge0->SetNext(hr_edge1->Next());
-						hr_edge1->Pre()->SetNext(hr_edge0);
-
-						hr_edge0->Next()->SetPolygon(hr_edge0->Polygon());
-						hr_edge0->Pre()->SetPolygon(hr_edge0->Polygon());
-
-						hr_edge0->Polygon()->SetHalfEdge(hr_edge0);
+						removed_h.insert(h);
+						if ((h->Origin() == v0 && h->End() == *adj_v) || (h->End() == v0 && h->Origin() == *adj_v))
+						{
+							h_0 = h;
+						}
+						if ((h->Origin() == v1 && h->End() == *adj_v) || (h->End() == v1 && h->Origin() == *adj_v))
+						{
+							h_1 = h;
+						}
 					}
-					if (hr_edge0->Polygon() != hr_edge1->Polygon())
+
+					removed_e.insert(h_0->Edge());
+					removed_e.insert(V::EdgeBetween(v0, v1));
+
+					for (auto adj_h : v1->AdjEdges())
 					{
-						heMesh.RemovePolygon(hr_edge1->Polygon());
-					}
+						if (adj_h->HalfEdge()->Origin() == v1)
+						{
+							adj_h->HalfEdge()->SetOrigin(v0);
+						}
 
-					E *edge1 = V::EdgeBetween(*adj_v, v1);
-					heMesh.RemoveEdge(edge1);
+						if (adj_h->HalfEdge()->Pair()->Origin() == v1)
+						{
+							adj_h->HalfEdge()->Pair()->SetOrigin(v0);
+						}
+
+						
+					}
+					h_0->Pair()->SetEdge(h_1->Pair()->Edge());
+					h_0->Pair()->SetPair(h_1->Pair());
+					h_1->Pair()->SetPair(h_0->Pair());
 				}
 				else
 				{
