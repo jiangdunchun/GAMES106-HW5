@@ -265,17 +265,18 @@ public:
 			Eigen::Matrix4d Q1 = Qs[heMesh.Index(v1)];
 
 			Eigen::Matrix4d Qv = Q0 + Q1;
-			Qv.row(3) << 0.0, 0.0, 0.0, 1.0;
+			Eigen::Matrix4d d_Qv = Qv;
+			d_Qv.row(3) << 0.0, 0.0, 0.0, 1.0;
 
 			Eigen::Vector3d vv;
 
-			Eigen::Matrix4d Qv_i;
+			Eigen::Matrix4d d_Qv_i;
 			bool invertible;
 			double determinant;
-			Qv.computeInverseAndDetWithCheck(Qv_i, determinant, invertible);
+			d_Qv.computeInverseAndDetWithCheck(d_Qv_i, determinant, invertible);
 			if (invertible)
 			{
-				Eigen::Vector4d vv4 = Qv_i * Eigen::Vector4d(0, 0, 0, 1);
+				Eigen::Vector4d vv4 = d_Qv_i * Eigen::Vector4d(0, 0, 0, 1);
 
 				vv = Eigen::Vector3d(vv4.x(), vv4.y(), vv4.z()) / vv4.w();
 			}
@@ -300,104 +301,12 @@ public:
 
 		Eigen::Vector3d vv = min_vv;
 
-		v0->pos = vv;
 		if (v0->IsConnectedWith(v1))
 		{
-			std::set<P *> removed_p;
-			std::set<E *> removed_e;
-			std::set<H *> removed_h;
-			for (auto adj_v = v1->AdjVertices().begin();
-				adj_v != v1->AdjVertices().end();
-				adj_v++)
-			{
-				if (v0 == *adj_v)
-					continue;
+			E *e01 = V::EdgeBetween(v0, v1);
 
-				if (v0->IsConnectedWith(*adj_v))
-				{
-					E *edge0 = V::EdgeBetween(v0, *adj_v);
-
-					P *face0 = nullptr;
-					if (!edge0->HalfEdge()->IsOnBoundary() && edge0->HalfEdge()->Next()->End() == v1)
-					{
-						face0 = edge0->HalfEdge()->Polygon();
-					}
-					else if (!edge0->HalfEdge()->Pair()->IsOnBoundary() && edge0->HalfEdge()->Pair()->Next()->End() == v1)
-					{
-						face0 = edge0->HalfEdge()->Pair()->Polygon();
-					}
-
-					removed_p.insert(face0);
-
-					H *h_0 = nullptr;
-					H *h_1 = nullptr;
-					for (auto h : face0->AdjHalfEdges())
-					{
-						removed_h.insert(h);
-						if ((h->Origin() == v0 && h->End() == *adj_v) || (h->End() == v0 && h->Origin() == *adj_v))
-						{
-							h_0 = h;
-						}
-						if ((h->Origin() == v1 && h->End() == *adj_v) || (h->End() == v1 && h->Origin() == *adj_v))
-						{
-							h_1 = h;
-						}
-					}
-
-					removed_e.insert(h_0->Edge());
-					removed_e.insert(V::EdgeBetween(v0, v1));
-
-					for (auto adj_h : v1->AdjEdges())
-					{
-						if (adj_h->HalfEdge()->Origin() == v1)
-						{
-							adj_h->HalfEdge()->SetOrigin(v0);
-						}
-
-						if (adj_h->HalfEdge()->Pair()->Origin() == v1)
-						{
-							adj_h->HalfEdge()->Pair()->SetOrigin(v0);
-						}
-
-						
-					}
-					h_0->Pair()->SetEdge(h_1->Pair()->Edge());
-					h_0->Pair()->SetPair(h_1->Pair());
-					h_1->Pair()->SetPair(h_0->Pair());
-				}
-				else
-				{
-					H *h_edge1 = V::HalfEdgeAlong(v1, *adj_v);
-					if (h_edge1)
-					{
-						if (h_edge1->Origin() == v1)
-						{
-							h_edge1->SetOrigin(v0);
-						}
-						else
-						{
-							h_edge1->Next()->SetOrigin(v0);
-						}
-					}
-					
-
-					H *hr_edge1 = V::HalfEdgeAlong(*adj_v, v1);
-					if (hr_edge1)
-					{
-						if (hr_edge1->Origin() == v1)
-						{
-							hr_edge1->SetOrigin(v0);
-						}
-						else
-						{
-							hr_edge1->Next()->SetOrigin(v0);
-						}
-					}
-				}
-			}
-
-			heMesh.RemoveEdge(V::EdgeBetween(v0, v1));
-			heMesh.RemoveVertex(v1);
+			V *vn = heMesh.CollapseEdge(e01);
+			vn->pos = vv;
 		}
 		else
 		{
