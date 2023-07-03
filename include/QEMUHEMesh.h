@@ -264,16 +264,16 @@ public:
 			bool invertible;
 			double determinant;
 			d_Qv.computeInverseAndDetWithCheck(d_Qv_i, determinant, invertible);
-			//if (invertible)
-			//{
-			//	Eigen::Vector4d vv4 = d_Qv_i * Eigen::Vector4d(0, 0, 0, 1);
+			if (invertible)
+			{
+				Eigen::Vector4d vv4 = d_Qv_i * Eigen::Vector4d(0, 0, 0, 1);
 
-			//	ret.pos = Eigen::Vector3d(vv4.x(), vv4.y(), vv4.z()) / vv4.w();
-			//}
-			//else
-			//{
+				ret.pos = Eigen::Vector3d(vv4.x(), vv4.y(), vv4.z()) / vv4.w();
+			}
+			else
+			{
 				ret.pos = (v0->pos + v1->pos) / 2;
-			//}
+			}
 			Eigen::Vector4d vv4 = Eigen::Vector4d(ret.pos.x(), ret.pos.y(), ret.pos.z(), 1);
 
 			ret.error = vv4.transpose() * ret.Q * vv4;
