@@ -208,7 +208,11 @@ public:
         QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
         // TODO: implement this
 
-		std::vector<Eigen::Matrix4d> Qs(heMesh.Vertices().size(), Eigen::Matrix4d::Zero());
+		std::map<V*, Eigen::Matrix4d> Qs;
+		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
+		{
+			Qs[heMesh.Vertices()[i]] = Eigen::Matrix4d::Zero();
+		}
 		for (size_t i = 0; i < heMesh.Polygons().size(); i++)
 		{
 			P *triangle = heMesh.Polygons()[i];
@@ -225,20 +229,60 @@ public:
 
 			Eigen::Matrix4d kp = p * p.transpose();
 
-			Qs[heMesh.Index(v0)] += kp;
-			Qs[heMesh.Index(v1)] += kp;
-			Qs[heMesh.Index(v2)] += kp;
+			Qs[v0] += kp;
+			Qs[v1] += kp;
+			Qs[v2] += kp;
 		}
 
 		struct pair
 		{
 			V *v0;
 			V *v1;
+			Eigen::Vector3d pos;
+			double error;
+			Eigen::Matrix4d Q;
+
+			bool operator()(pair &a, pair &b)
+			{
+				return a.error > b.error;
+			}
 		};
 
-		double t = 0.0;
+		auto createPair = [&](V *v0, V *v1) -> pair {
+			pair ret;
+			ret.v0 = v0;
+			ret.v1 = v1;
 
-		std::vector<pair> pairs;
+			Eigen::Matrix4d Q0 = Qs[v0];
+			Eigen::Matrix4d Q1 = Qs[v1];
+
+			ret.Q = Q0 + Q1;
+			Eigen::Matrix4d d_Qv = ret.Q;
+			d_Qv.row(3) << 0.0, 0.0, 0.0, 1.0;
+
+			Eigen::Matrix4d d_Qv_i;
+			bool invertible;
+			double determinant;
+			d_Qv.computeInverseAndDetWithCheck(d_Qv_i, determinant, invertible);
+			//if (invertible)
+			//{
+			//	Eigen::Vector4d vv4 = d_Qv_i * Eigen::Vector4d(0, 0, 0, 1);
+
+			//	ret.pos = Eigen::Vector3d(vv4.x(), vv4.y(), vv4.z()) / vv4.w();
+			//}
+			//else
+			//{
+				ret.pos = (v0->pos + v1->pos) / 2;
+			//}
+			Eigen::Vector4d vv4 = Eigen::Vector4d(ret.pos.x(), ret.pos.y(), ret.pos.z(), 1);
+
+			ret.error = vv4.transpose() * ret.Q * vv4;
+
+			return ret;
+		};
+
+		double t = 0;
+		std::priority_queue<pair, std::vector<pair>, pair> pairs;
 		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
 		{
 			V *v0 = heMesh.Vertices()[i];
@@ -248,69 +292,42 @@ public:
 				
 				if (v0->IsConnectedWith(v1) || (v0->pos - v1->pos).norm() < t)
 				{
-					pairs.push_back({v0, v1});
+					pairs.push(createPair(v0, v1));
 				}
 			}
 		}
 
-		int min_i;
-		double min_error = DBL_MAX;
-		Eigen::Vector3d min_vv;
-		for (size_t i = 0; i < pairs.size(); ++i)
+		std::set<V *> delete_vertices;
+		while (heMesh.Polygons().size() > targetFaceCount)
 		{
-			V *v0 = pairs[i].v0;
-			V *v1 = pairs[i].v1;
+			auto p = pairs.top();
+			pairs.pop();
 
-			Eigen::Matrix4d Q0 = Qs[heMesh.Index(v0)];
-			Eigen::Matrix4d Q1 = Qs[heMesh.Index(v1)];
+			if (delete_vertices.find(p.v0) != delete_vertices.end() || delete_vertices.find(p.v1) != delete_vertices.end())
+				continue;
 
-			Eigen::Matrix4d Qv = Q0 + Q1;
-			Eigen::Matrix4d d_Qv = Qv;
-			d_Qv.row(3) << 0.0, 0.0, 0.0, 1.0;
+			delete_vertices.insert(p.v0);
+			delete_vertices.insert(p.v1);
 
-			Eigen::Vector3d vv;
-
-			Eigen::Matrix4d d_Qv_i;
-			bool invertible;
-			double determinant;
-			d_Qv.computeInverseAndDetWithCheck(d_Qv_i, determinant, invertible);
-			if (invertible)
+			if (p.v0->IsConnectedWith(p.v1))
 			{
-				Eigen::Vector4d vv4 = d_Qv_i * Eigen::Vector4d(0, 0, 0, 1);
+				E *e01 = V::EdgeBetween(p.v0, p.v1);
 
-				vv = Eigen::Vector3d(vv4.x(), vv4.y(), vv4.z()) / vv4.w();
+				V *vn = heMesh.CollapseEdge(e01);
+
+				vn->pos = p.pos;
+
+				Qs[vn] = p.Q;
+
+				auto adjs = vn->AdjVertices();
+				for (auto adj : adjs)
+				{
+					pairs.push(createPair(vn, adj));
+				}
 			}
 			else
 			{
-				vv = (v0->pos + v1->pos) / 2;
 			}
-			Eigen::Vector4d vv4 = Eigen::Vector4d(vv.x(), vv.y(), vv.z(), 1);
-			
-			double error = vv4.transpose() * Qv * vv4;
-
-			if (error < min_error)
-			{
-				min_error = error;
-				min_i = i;
-				min_vv = vv;
-			}
-		}
-
-		V *v0 = pairs[min_i].v0;
-		V *v1 = pairs[min_i].v1;
-
-		Eigen::Vector3d vv = min_vv;
-
-		if (v0->IsConnectedWith(v1))
-		{
-			E *e01 = V::EdgeBetween(v0, v1);
-
-			V *vn = heMesh.CollapseEdge(e01);
-			vn->pos = vv;
-		}
-		else
-		{
-
 		}
 
         return true;
