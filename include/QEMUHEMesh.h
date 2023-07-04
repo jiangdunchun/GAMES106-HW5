@@ -204,11 +204,8 @@ public:
 
 public:
 
-    inline bool DoSimplification(SimplificationMode mode, int targetFaceCount) {
-        QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
-        // TODO: implement this
-
-		std::map<V*, Eigen::Matrix4d> Qs;
+	inline bool BasicQEM(int targetFaceCount) {
+		std::map<V *, Eigen::Matrix4d> Qs;
 		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
 		{
 			Qs[heMesh.Vertices()[i]] = Eigen::Matrix4d::Zero();
@@ -234,10 +231,9 @@ public:
 			Qs[v2] += kp;
 
 			std::vector<H *> h_pairs = {
-				V::HalfEdgeAlong(v1, v0),
-				V::HalfEdgeAlong(v2, v1),
-				V::HalfEdgeAlong(v0, v2)
-			};
+			    V::HalfEdgeAlong(v1, v0),
+			    V::HalfEdgeAlong(v2, v1),
+			    V::HalfEdgeAlong(v0, v2)};
 			for (auto h : h_pairs)
 			{
 				if (h->IsOnBoundary())
@@ -260,10 +256,10 @@ public:
 
 		struct pair
 		{
-			V *v0;
-			V *v1;
+			V              *v0;
+			V              *v1;
 			Eigen::Vector3d pos;
-			double error;
+			double          error;
 			Eigen::Matrix4d Q;
 
 			bool operator()(pair &a, pair &b)
@@ -280,13 +276,13 @@ public:
 			Eigen::Matrix4d Q0 = Qs[v0];
 			Eigen::Matrix4d Q1 = Qs[v1];
 
-			ret.Q = Q0 + Q1;
+			ret.Q                = Q0 + Q1;
 			Eigen::Matrix4d d_Qv = ret.Q;
 			d_Qv.row(3) << 0.0, 0.0, 0.0, 1.0;
 
 			Eigen::Matrix4d d_Qv_i;
-			bool invertible;
-			double determinant;
+			bool            invertible;
+			double          determinant;
 			d_Qv.computeInverseAndDetWithCheck(d_Qv_i, determinant, invertible);
 			if (invertible)
 			{
@@ -305,7 +301,7 @@ public:
 			return ret;
 		};
 
-		double t = 0;
+		double                                             t = 0;
 		std::priority_queue<pair, std::vector<pair>, pair> pairs;
 		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
 		{
@@ -313,7 +309,7 @@ public:
 			for (size_t j = i + 1; j < heMesh.Vertices().size(); j++)
 			{
 				V *v1 = heMesh.Vertices()[j];
-				
+
 				if (v0->IsConnectedWith(v1) || (v0->pos - v1->pos).norm() < t)
 				{
 					pairs.push(createPair(v0, v1));
@@ -354,7 +350,87 @@ public:
 			}
 		}
 
-        return true;
+		return true;
+  }
+	
+	enum ModelType
+	{
+		Geometry = 0,
+		Texture2D = 1 << 0,
+		Normals = 1 << 1
+	};
+	inline bool QEMfuc(char modelType, int targetFaceCount) {
+		int dimension = 3;
+		if (modelType & ModelType::Texture2D)
+			dimension += 2;
+		if (modelType & ModelType::Normals)
+			dimension += 3;
+
+		auto getP = [&](V *v) -> Eigen::VectorXd {
+			Eigen::VectorXd ret(dimension);
+
+			int i = 0;
+
+			ret(0) = v->pos(0);
+			ret(1) = v->pos(1);
+			ret(2) = v->pos(2);
+			i += 3;
+
+			if (modelType & ModelType::Texture2D)
+			{
+				ret(i) = v->uv(0);
+				ret(i + 1) = v->uv(1);
+				i += 2;
+			}
+
+			if (modelType & ModelType::Normals)
+			{
+				ret(i) = v->normal(0);
+				ret(i + 1) = v->normal(1);
+				ret(i + 2) = v->normal(2);
+				i += 3;
+			}
+
+			return ret;
+		};
+
+		
+
+		std::map<V *, Eigen::MatrixXd> Qs;
+		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
+		{
+			Qs[heMesh.Vertices()[i]] = Eigen::MatrixXd::Zero(dimension + 1, dimension + 1);
+		}
+		for (size_t i = 0; i < heMesh.Polygons().size(); i++)
+		{
+			P *triangle = heMesh.Polygons()[i];
+
+			V *v0 = triangle->HalfEdge()->Origin();
+			V *v1 = triangle->HalfEdge()->End();
+			V *v2 = triangle->HalfEdge()->Next()->End();
+
+			Eigen::VectorXd p = getP(v0);
+			Eigen::VectorXd q = getP(v1);
+			Eigen::VectorXd r = getP(v2);
+
+			Eigen::VectorXd e1 = q - p;
+			e1 = e1 / e1.norm();
+			Eigen::VectorXd e2 = r - p - e1.dot(r - p) * e1;
+			e2  = e2 / e2.norm();
+
+			Eigen::MatrixXd A = Eigen::MatrixXd::Identity(dimension, dimension) - e1 * e1.transpose() - e2 * e2.transpose();
+
+			Eigen::VectorXd b = p.dot(e1) * e1 + p.dot(e2) * e2 - p;
+
+			double c = p.dot(p) - pow(p.dot(e1), 2) - pow(p.dot(e2), 2);
+		}
+		return true;
+	}
+
+    inline bool DoSimplification(SimplificationMode mode, int targetFaceCount) {
+        QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
+        
+		return BasicQEM(targetFaceCount);
     }
 
 };
