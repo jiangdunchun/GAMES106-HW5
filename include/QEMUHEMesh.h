@@ -232,6 +232,30 @@ public:
 			Qs[v0] += kp;
 			Qs[v1] += kp;
 			Qs[v2] += kp;
+
+			std::vector<H *> h_pairs = {
+				V::HalfEdgeAlong(v1, v0),
+				V::HalfEdgeAlong(v2, v1),
+				V::HalfEdgeAlong(v0, v2)
+			};
+			for (auto h : h_pairs)
+			{
+				if (h->IsOnBoundary())
+				{
+					Eigen::Vector3d edge = h->Origin()->pos - h->End()->pos;
+
+					Eigen::Vector3d p_normal = (edge.cross(normal)).normalized();
+
+					double p_distance = -1 * h->Origin()->pos.dot(p_normal);
+
+					Eigen::Vector4d p_p(p_normal.x(), p_normal.y(), p_normal.z(), p_distance);
+
+					Eigen::Matrix4d p_kp = p_p * p_p.transpose();
+
+					Qs[h->Origin()] += p_kp;
+					Qs[h->End()] += p_kp;
+				}
+			}
 		}
 
 		struct pair
