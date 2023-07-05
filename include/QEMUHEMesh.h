@@ -359,15 +359,58 @@ public:
 		Texture2D = 1 << 0,
 		Normals = 1 << 1
 	};
+	struct Q_coe 
+	{
+		Eigen::MatrixXd A;
+		Eigen::VectorXd b;
+		double c;
+
+		Q_coe() {}
+		Q_coe(int d) {
+			A = Eigen::MatrixXd::Zero(d, d);
+			b = Eigen::VectorXd::Zero(d);
+			c = 0;
+		}
+		Q_coe(Eigen::MatrixXd A_, Eigen::VectorXd b_, double c_)
+		{
+			A = A_;
+			b = b_;
+			c = c_;
+		}
+		Q_coe operator+(const Q_coe &Q) const
+		{
+			Q_coe ret;
+			ret.A = A + Q.A;
+			ret.b = b + Q.b;
+			ret.c = c + Q.c;
+			return ret;
+		}
+	};
+	struct vertex_pair
+	{
+		V              *v0;
+		V              *v1;
+		Eigen::VectorXd pos;
+		double          error;
+		Q_coe           Q;
+
+		bool operator()(vertex_pair &a, vertex_pair &b)
+		{
+			return a.error > b.error;
+		}
+	};
+
+	
+	
 	inline bool QEMfuc(char modelType, int targetFaceCount) {
-		int dimension = 3;
+		int d = 3;
 		if (modelType & ModelType::Texture2D)
-			dimension += 2;
+			d += 2;
 		if (modelType & ModelType::Normals)
-			dimension += 3;
+			d += 3;
 
 		auto getP = [&](V *v) -> Eigen::VectorXd {
-			Eigen::VectorXd ret(dimension);
+			Eigen::VectorXd ret(d);
 
 			int i = 0;
 
@@ -393,13 +436,48 @@ public:
 
 			return ret;
 		};
+		auto setP = [&](V *vertex, Eigen::VectorXd v) {
+			int i = 0;
 
-		
+			vertex->pos(0) = v(i);
+			vertex->pos(1) = v(i + 1);
+			vertex->pos(2) = v(i + 2);
+			i += 3;
 
-		std::map<V *, Eigen::MatrixXd> Qs;
+			if (modelType & ModelType::Texture2D)
+			{
+				vertex->uv(0) = v(i);
+				vertex->uv(1) = v(i + 1);
+				i += 2;
+			}
+
+			if (modelType & ModelType::Normals)
+			{
+				vertex->normal(0) = v(i);
+				vertex->normal(1) = v(i + 1);
+				vertex->normal(2) = v(i + 2);
+				i += 3;
+			}
+		};
+		auto calQ = [&](Eigen::VectorXd p, Eigen::VectorXd q, Eigen::VectorXd r) -> Q_coe {
+			Eigen::VectorXd e1 = q - p;
+			e1                 = e1 / e1.norm();
+			Eigen::VectorXd e2 = r - p - e1.dot(r - p) * e1;
+			e2                 = e2 / e2.norm();
+
+			Eigen::MatrixXd A = Eigen::MatrixXd::Identity(d, d) - e1 * e1.transpose() - e2 * e2.transpose();
+
+			Eigen::VectorXd b = p.dot(e1) * e1 + p.dot(e2) * e2 - p;
+
+			double c = p.dot(p) - pow(p.dot(e1), 2) - pow(p.dot(e2), 2);
+
+			return Q_coe(A, b, c);
+		};
+
+		std::map<V *, Q_coe> Qs;
 		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
 		{
-			Qs[heMesh.Vertices()[i]] = Eigen::MatrixXd::Zero(dimension + 1, dimension + 1);
+			Qs[heMesh.Vertices()[i]] = Q_coe(d);
 		}
 		for (size_t i = 0; i < heMesh.Polygons().size(); i++)
 		{
@@ -409,28 +487,113 @@ public:
 			V *v1 = triangle->HalfEdge()->End();
 			V *v2 = triangle->HalfEdge()->Next()->End();
 
-			Eigen::VectorXd p = getP(v0);
-			Eigen::VectorXd q = getP(v1);
-			Eigen::VectorXd r = getP(v2);
+			Q_coe Q = calQ(getP(v0),getP( v1), getP(v2));
+			Qs[v0] = Qs[v0] + Q;
+			Qs[v1] = Qs[v1] + Q;
+			Qs[v2] = Qs[v2] + Q;
 
-			Eigen::VectorXd e1 = q - p;
-			e1 = e1 / e1.norm();
-			Eigen::VectorXd e2 = r - p - e1.dot(r - p) * e1;
-			e2  = e2 / e2.norm();
+			std::vector<H *> h_pairs = {
+			    V::HalfEdgeAlong(v1, v0),
+			    V::HalfEdgeAlong(v2, v1),
+			    V::HalfEdgeAlong(v0, v2)};
+			for (auto h : h_pairs)
+			{
+				if (h->IsOnBoundary())
+				{
+					Eigen::Vector3d normal = ((v2->pos - v0->pos).cross(v1->pos - v0->pos)).normalized();
 
-			Eigen::MatrixXd A = Eigen::MatrixXd::Identity(dimension, dimension) - e1 * e1.transpose() - e2 * e2.transpose();
+					Eigen::VectorXd p_p = getP(h->Origin());
+					Eigen::VectorXd p_q = getP(h->End());
+					Eigen::VectorXd p_r = p_q;
+					p_r.segment(0, 3) += normal;
 
-			Eigen::VectorXd b = p.dot(e1) * e1 + p.dot(e2) * e2 - p;
+					Q_coe p_Q = calQ(p_p, p_q, p_r);
 
-			double c = p.dot(p) - pow(p.dot(e1), 2) - pow(p.dot(e2), 2);
+					Qs[h->Origin()] = Qs[h->Origin()]  + p_Q;
+					Qs[h->End()] = Qs[h->End()] + p_Q;
+				}
+			}
 		}
+
+		auto createPair = [&](V *v0, V *v1) -> vertex_pair {
+			vertex_pair ret;
+			ret.v0 = v0;
+			ret.v1 = v1;
+
+			Q_coe Q0 = Qs[v0];
+			Q_coe Q1 = Qs[v1];
+
+			ret.Q = Q0 + Q1;
+			
+			if (ret.Q.A.determinant() != 0)
+			{
+				ret.pos = -1 * ret.Q.A.inverse() * ret.Q.b;
+			}
+			else
+			{
+				ret.pos = (getP(v0) + getP(v1)) / 2;
+			}
+			ret.error = ret.Q.b.transpose() * ret.pos + ret.Q.c;
+
+			return ret;
+		};
+		double t = 0;
+		std::priority_queue<vertex_pair, std::vector<vertex_pair>, vertex_pair> pairs;
+		for (size_t i = 0; i < heMesh.Vertices().size(); i++)
+		{
+			V *v0 = heMesh.Vertices()[i];
+			for (size_t j = i + 1; j < heMesh.Vertices().size(); j++)
+			{
+				V *v1 = heMesh.Vertices()[j];
+
+				if (v0->IsConnectedWith(v1) || (v0->pos - v1->pos).norm() < t)
+				{
+					pairs.push(createPair(v0, v1));
+				}
+			}
+		}
+
+		std::set<V *> delete_vertices;
+		while (heMesh.Polygons().size() > targetFaceCount)
+		{
+			auto p = pairs.top();
+			pairs.pop();
+
+			if (delete_vertices.find(p.v0) != delete_vertices.end() || delete_vertices.find(p.v1) != delete_vertices.end())
+				continue;
+
+			delete_vertices.insert(p.v0);
+			delete_vertices.insert(p.v1);
+
+			if (p.v0->IsConnectedWith(p.v1))
+			{
+				E *e01 = V::EdgeBetween(p.v0, p.v1);
+
+				V *vn = heMesh.CollapseEdge(e01);
+
+				setP(vn, p.pos);
+
+				Qs[vn] = p.Q;
+
+				auto adjs = vn->AdjVertices();
+				for (auto adj : adjs)
+				{
+					pairs.push(createPair(vn, adj));
+				}
+			}
+			else
+			{
+			}
+		}
+
 		return true;
 	}
 
     inline bool DoSimplification(SimplificationMode mode, int targetFaceCount) {
         QEM_DEBUG("DoSimplification(mode=%d, targetFaceCount=%d)", mode, targetFaceCount);
         
-		return BasicQEM(targetFaceCount);
+		//return BasicQEM(targetFaceCount);
+		return QEMfuc(ModelType::Normals | ModelType::Texture2D, targetFaceCount);
     }
 
 };
