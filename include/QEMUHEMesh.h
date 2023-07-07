@@ -489,8 +489,8 @@ public:
 				{
 					Eigen::Vector3d normal = ((v2->pos - v0->pos).cross(v1->pos - v0->pos)).normalized();
 
-					V *origin = triangle->HalfEdge()->Origin();
-					V *end = triangle->HalfEdge()->End();
+					V *origin = h->Origin();
+					V *end = h->End();
 
 					Eigen::VectorXd p = getVertex(origin);
 					Eigen::VectorXd q = getVertex(end);
