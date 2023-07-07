@@ -479,6 +479,7 @@ public:
 			Qs[v1] = Qs[v1] + Q;
 			Qs[v2] = Qs[v2] + Q;
 
+			Eigen::Vector3d normal = ((v2->pos - v0->pos).cross(v1->pos - v0->pos)).normalized();
 			std::vector<H *> h_pairs = {
 			    V::HalfEdgeAlong(v1, v0),
 			    V::HalfEdgeAlong(v2, v1),
@@ -487,8 +488,6 @@ public:
 			{
 				if (h->IsOnBoundary())
 				{
-					Eigen::Vector3d normal = ((v2->pos - v0->pos).cross(v1->pos - v0->pos)).normalized();
-
 					V *origin = h->Origin();
 					V *end = h->End();
 
