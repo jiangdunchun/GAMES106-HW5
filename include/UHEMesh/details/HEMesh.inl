@@ -893,8 +893,10 @@ namespace Ubpa {
 			newE->SetHalfEdge(he10NextPair);
 
 			Delete<E>(he10Next->Edge());
+		    if (he10Next->Edge() != he10Pre->Edge())
 			Delete<E>(he10Pre->Edge());
 			Delete<H>(he10Next);
+		    if (he10Next != he10Pre)
 			Delete<H>(he10Pre);
 			if (!P::IsBoundary(p10))
 				Delete<P>(p10);
