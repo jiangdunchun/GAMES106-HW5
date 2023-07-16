@@ -543,7 +543,7 @@ public:
 		}
 
 		std::set<V *> deleteVs;
-		while (heMesh.Polygons().size() > targetFaceCount)
+		while (heMesh.Polygons().size() > targetFaceCount && !pairs.empty())
 		{
 			auto p = pairs.top();
 			pairs.pop();
@@ -554,6 +554,10 @@ public:
 			if (p.v0->IsConnectedWith(p.v1))
 			{
 				E *e01 = V::EdgeBetween(p.v0, p.v1);
+
+				// @TODO
+				if (p.v0->IsOnBoundary() || p.v1->IsOnBoundary())
+					continue;
 
 				if (!heMesh.IsCollapsable(e01)) 
 					continue;
