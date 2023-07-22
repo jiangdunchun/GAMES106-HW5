@@ -514,15 +514,21 @@ public:
 			Quadric Q1 = Qs[v1];
 
 			ret.Q = Q0 + Q1;
-			
-			if (ret.Q.A.determinant() != 0)
+			if (!(v0->IsOnBoundary() && v1->IsOnBoundary()) && (v0->IsOnBoundary() || v1->IsOnBoundary()))
 			{
-				ret.pos = -1 * ret.Q.A.inverse() * ret.Q.b;
+				if (v0->IsOnBoundary())
+					ret.pos = getVertex(v0);
+				else 
+					ret.pos = getVertex(v1);
 			}
 			else
 			{
-				ret.pos = (getVertex(v0) + getVertex(v1)) / 2;
+				if (ret.Q.A.determinant() != 0)
+					ret.pos = -1 * ret.Q.A.inverse() * ret.Q.b;
+				else
+					ret.pos = (getVertex(v0) + getVertex(v1)) / 2;
 			}
+			
 			ret.error = ret.Q.b.transpose() * ret.pos + ret.Q.c;
 
 			return ret;
@@ -555,8 +561,7 @@ public:
 			{
 				E *e01 = V::EdgeBetween(p.v0, p.v1);
 
-				// @TODO
-				if (p.v0->IsOnBoundary() || p.v1->IsOnBoundary())
+				if (p.v0->IsOnBoundary() && p.v1->IsOnBoundary())
 					continue;
 
 				if (!heMesh.IsCollapsable(e01)) 
