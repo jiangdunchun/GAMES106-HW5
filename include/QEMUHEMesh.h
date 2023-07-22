@@ -561,6 +561,7 @@ public:
 			{
 				E *e01 = V::EdgeBetween(p.v0, p.v1);
 
+				// @TODO: COMMENT THIS CODE WHILE USING qem-debug-normal-curved.obj
 				if (p.v0->IsOnBoundary() && p.v1->IsOnBoundary())
 					continue;
 
